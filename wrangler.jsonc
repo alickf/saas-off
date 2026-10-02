@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "saas-off",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-02",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": [
+      "/",
+      "/s/*",
+      "/apps/*",
+      "/leaderboard",
+      "/about",
+      "/privacy",
+      "/api/*",
+      "/og/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "saas-off",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "17 3 * * *"
+    ]
+  },
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "SITE_URL": "https://saas-off.com"
+  },
+  "routes": [
+    {
+      "pattern": "saas-off.com",
+      "custom_domain": true
+    }
+  ]
+}
