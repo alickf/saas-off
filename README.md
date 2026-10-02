@@ -1,26 +1,20 @@
 # SaaS-Off
 
-**Four tabs. Show your stack.**
+**Only four tabs. Choose wisely.**
 
-Pick the four browser-based apps you practically live in. Share the resulting card, find matching combinations and explore the leaderboard. No sign-up. Open source.
+If you could only keep four apps open, which would you choose? Pick your favourites, share your line-up and see which SaaS product leads the pack. No sign-up. Open source.
 
-## What is built
+Production domain: **saas-off.com**. Runtime: **Cloudflare Workers + D1**. Domain registrar: **IONOS**. No KV, external shortener, LinkedIn API key or image service is required.
 
-- Searchable, categorised catalogue of 48 apps and a responsive four-slot picker.
-- Order-independent combinations: all 24 permutations resolve to the same short URL.
-- Persistent combination and individual-app leaderboards, plus three-out-of-four neighbours.
-- One active pick per signed anonymous browser cookie. Repeats are idempotent; changes move the pick.
-- Server-rendered Open Graph metadata and real 1,200 × 630 PNG previews.
-- LinkedIn link sharing, image download, copy-link and editable-caption copy.
-- Brand landing pages and one-slot-prefilled campaign links.
-- Optional source-stack attribution without splitting the canonical page.
-- MIT-licensed code, GitHub footer, app-request issue form and CI tests.
+## The app
 
-This is an initial implementation, not a deployed service. No production account, database, domain or secret has been provisioned by this repository.
+A searchable catalogue of 48 apps fills four slots. Every unordered combination has one short URL and a generated 1,200 × 630 PNG sharing card. Matching submissions reuse the page. One signed anonymous browser cookie has one active pick: repeats do not add votes, and changing the selection moves the pick.
 
-## Run locally
+The leaderboard opens on individual SaaS products, with a second view for combinations. Brand pages, three-out-of-four matches, LinkedIn link sharing, image download, copy-link and copy-caption actions are included. Views and preview crawlers never vote. Application code is MIT-licensed; brand assets retain their owners' rights.
 
-Requires Node.js 22.16 or later. Sharp is a **build-time** dependency; the application and Worker have no third-party runtime JavaScript dependencies.
+## Local development
+
+Requires Node.js 22.16+.
 
 ```sh
 npm install
@@ -28,81 +22,49 @@ npm run dev
 # http://localhost:8787
 ```
 
-The local Node server uses an on-disk SQLite database at `.data/saas-off.sqlite`. It runs the same request handler as the Worker, using a small D1-compatible database adapter. This is not a replacement for a real Workers-runtime deployment test.
+The local server uses SQLite and the real Fetch handler. It is not a production host or proof of Cloudflare CPU usage. For an offline build, run `SKIP_ICON_FETCH=1 npm run build`, then `npm start`. The leaderboard is not seeded with artificial votes.
 
-For a network-independent build:
+## Deployment
 
-```sh
-SKIP_ICON_FETCH=1 npm run build
-npm start
-```
-
-Local data is deliberately not seeded with fake users or votes. The leaderboard starts empty. The default social preview uses Jira, Figma, GitHub and Netlify as an illustration, without adding any picks.
-
-## Deploy
-
-The target is **Cloudflare Workers + D1**, not IONOS hosting. IONOS can remain the domain registrar. See [deployment instructions](docs/DEPLOYMENT.md), including the database, secret and domain configuration.
+Read [the launch checklist](docs/DEPLOYMENT.md) before deploying. `wrangler.jsonc` now targets the custom domain `saas-off.com`; its Cloudflare DNS zone must be active first. The D1 database ID remains a deliberate placeholder until a database is provisioned in your account.
 
 ```sh
 npx wrangler login
 npx wrangler d1 create saas-off
-# Set the returned database_id in wrangler.jsonc.
+# Replace the database_id placeholder in wrangler.jsonc.
 npm run db:remote
 npx wrangler secret put COOKIE_SECRET
 npm run deploy
 ```
 
-Supply a random secret of at least 32 characters. Never commit a real secret. `SITE_URL` is optional: without it, canonical URLs use the incoming request's origin. Once the final domain exists, configure an HTTPS `SITE_URL` for consistent canonical links.
+Use a random secret of at least 32 characters. Never commit credentials. `SITE_URL` is configured as `https://saas-off.com`; the Node development server uses its local origin unless explicitly overridden. `npm run dev:worker` clears that variable for local Wrangler testing.
 
-## Quality checks
+## Validation
 
 ```sh
 npm run check
 npm run build
 npm test
+npm run benchmark:og
 npx playwright install chromium
 npm run test:e2e
+npx wrangler deploy --dry-run
 ```
 
-The Node tests cover canonicalisation, concurrent repeat submissions, moving picks, referrals, CSRF checks, cookie signatures, rate limits, server-rendered metadata, real 404s, nearest matches and PNG encoding. Playwright covers the complete desktop/mobile flow. GitHub Actions also performs a Wrangler dry run. CI outcomes are visible on the PR; committed tests are not themselves a claim that CI has passed.
+The tests cover canonicalisation, idempotent submissions, moving picks, referrals, cookie signatures, CSRF, rate limits, rankings, OG output, cache isolation and expiry, production metadata and the retained H1 highlight. Browser tests exercise desktop and mobile flows. Consult the actual CI run for its result.
 
-The first network-enabled dependency installation creates `package-lock.json`. Review and commit it before relying on reproducible production builds; CI retains its generated lockfile as an artifact until one is checked in.
+`benchmark:og` reports local process CPU and wall time, not Cloudflare invocation CPU. A **cold** production image must be checked against your account's runtime limits. Do not claim the app runs on the free plan merely because a build or warm cache request succeeds.
 
-## Icons, not a public URL fetcher
+## Low-cost operation
 
-Icon sources are explicitly curated in `src/catalogue.js`. The build tries first-party icon URLs, caches successful assets and rasterises everything into same-origin PNGs. It can read common PNG-backed and 32-bit ICO files. Larger available icon sources are preferred where configured.
+D1 remains the source of truth for picks. Public leaderboard responses are edge-cached for 30 seconds; submissions are never cached. Immutable OG images use a versioned cache key and skip D1 and rendering on a cache hit. Neither cache is durable storage or a guarantee against cold requests.
 
-If a source is unavailable, the build uses a Font Awesome Brands glyph, the attributed Netlify fallback, or a visibly recognisable initial badge. It does not silently pretend that every favicon was fetched. Review `dist/icon-provenance.json` before launch, replace low-quality/misleading fallbacks, and consult the owners' brand rules. See [brand asset notes](BRAND-ASSETS.md).
+## Brand assets
 
-```sh
-REFRESH_ICONS=1 npm run build
-```
+Sources are curated in `src/catalogue.js` and fetched only at build time, never from user-submitted URLs. Fallbacks are explicitly reported in `dist/icon-provenance.json`. Review the provenance and visual artwork before launch; initials and parent-company logos are not necessarily suitable app icons. `REFRESH_ICONS=1 npm run build` refreshes sources. See [BRAND-ASSETS.md](BRAND-ASSETS.md).
 
-There is no runtime endpoint that fetches user-supplied domains, URLs, images or fonts. There is no third-party favicon hotlinking or browser-history access.
+A fresh dependency installation currently creates a lockfile. CI retains it as an artifact; review and commit it before treating production builds as reproducible.
 
-## How sharing works
+## Contribute
 
-Sorted, immutable app IDs form a unique combination key. A 96-bit SHA-256 prefix gives the 16-character URL-safe ID; the database also enforces unique keys and rejects any detected ID collision. `/s/:id` is the canonical short page. No URL-shortener service is involved.
-
-The server supplies OG tags in the first HTML response. `/og/:id.png?v=1` combines pre-rasterised trusted app tiles and a stable background into a PNG using native compression. Fonts and images are not fetched remotely at runtime, and dynamic counts are excluded from the artwork. Shared previews still depend on the receiving platform's fetch and cache behaviour.
-
-The LinkedIn button opens a **link post**, not a native uploaded image post, and does not prefill the LinkedIn composer text. Use Copy caption and Save image for that alternative. There is no LinkedIn login, OAuth, posting API or scraping.
-
-## Counts and privacy
-
-An anonymous signed cookie records one active browser pick. It is not a verified human identity: clearing cookies, using another browser, automated traffic or distributed abuse can create additional picks. Do not label the totals “unique users” or market share.
-
-Counts cover active picks from the last 180 days, with daily expiry housekeeping. New visitors do not get a cookie until they submit. An IP-derived keyed rate bucket limits submission frequency; raw IP addresses are not stored by the app. The host can have separate infrastructure-level data processing.
-
-## Project structure
-
-```text
-public/         Responsive browser UI and static shell
-src/            Catalogue, combination rules, Worker handler and PNG compositor
-scripts/        Build-time icons/artwork and local SQLite development adapter
-migrations/     D1 schema
-test/          Unit/integration and Playwright browser tests
-docs/          Deployment and architecture notes
-```
-
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Application code is MIT-licensed; brand assets are not included in that grant.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). The app's footer links to this repository. Missing apps can be suggested through the app-request issue template.

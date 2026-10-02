@@ -1,6 +1,7 @@
 import { APPS, APP_MAP, EXAMPLE_IDS } from './catalogue.js';
 import { combination, HttpError, isStackId, escapeHtml as esc, publicApp, base64url } from './domain.js';
 import { socialImage } from './png.js';
+import { cachedLeaderboard } from './cache.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const SECURITY = {
@@ -126,8 +127,8 @@ function originFor(request, env) {
   return value.origin;
 }
 async function page(request, env, path) {
-  let title = 'SaaS-Off — Four tabs. Show your stack.';
-  let description = 'Which four apps do you practically live in? Pick your four, share your stack and find your people. No sign-up. Open source.';
+  let title = 'SaaS-Off — Only four tabs. Choose wisely.';
+  let description = 'If you could only keep four apps open, which would you choose? Pick your favourites, share your line-up and see which SaaS product leads the pack. No sign-up.';
   let initial = null; let status = 200;
   const origin = originFor(request, env);
   let image = `${origin}/og/default.png`;
@@ -138,8 +139,8 @@ async function page(request, env, path) {
     if (status === 200) {
       const names = initial.apps.map(a => a.name).join(' + ');
       title = `${names} — SaaS-Off`;
-      description = `These are my four. ${names}. Which four tabs do you live in? Create your own stack — no sign-up.`;
-      image = `${origin}/og/${initial.id}.png?v=1`;
+      description = `These are my four. ${names}. Only four tabs. Which apps make the cut? Pick your four — no sign-up.`;
+      image = `${origin}/og/${initial.id}.png?v=2`;
     }
   } else if (path.startsWith('/apps/')) {
     const app = APP_MAP.get(path.slice(6));
@@ -153,7 +154,7 @@ async function page(request, env, path) {
   const shell = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
   if (!shell.ok) throw new Error('App build is missing.');
   const seo = `<title>${esc(title)}</title><meta name="description" content="${esc(description)}"><link rel="canonical" href="${esc(origin + canonicalPath)}">
-    <meta property="og:type" content="website"><meta property="og:site_name" content="SaaS-Off"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}"><meta property="og:url" content="${esc(origin + canonicalPath)}"><meta property="og:image" content="${esc(image)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="${esc(initial?.apps ? initial.apps.map(a => a.name).join(', ') + ' — my four everyday apps' : 'SaaS-Off. Four tabs. Show your stack.')}"><meta name="twitter:card" content="summary_large_image">${status !== 200 ? '<meta name="robots" content="noindex">' : ''}`;
+    <meta property="og:type" content="website"><meta property="og:site_name" content="SaaS-Off"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}"><meta property="og:url" content="${esc(origin + canonicalPath)}"><meta property="og:image" content="${esc(image)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="${esc(initial?.apps ? initial.apps.map(a => a.name).join(', ') + ' — my four everyday apps' : 'SaaS-Off. Only four tabs. Choose wisely.')}"><meta name="twitter:card" content="summary_large_image">${status !== 200 ? '<meta name="robots" content="noindex">' : ''}`;
   const bootstrap = JSON.stringify(initial).replaceAll('<', '\\u003c');
   const html = (await shell.text()).replace('<!--SEO-->', seo).replace('<!--INITIAL-->', `<script id="initial-data" type="application/json">${bootstrap}</script>`);
   return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
@@ -163,27 +164,32 @@ async function route(request, env, ctx) {
   if (request.method === 'POST' && path === '/api/picks') return submit(request, env);
   if (!['GET', 'HEAD'].includes(request.method)) throw new HttpError(405, 'Method not allowed.');
   if (path === '/api/catalogue') return json(APPS.map(publicApp));
-  if (path === '/api/leaderboard') return json(await leaderboard(env.DB, url.searchParams.get('app')));
+  if (path === '/api/leaderboard') return cachedLeaderboard(request, env.IMAGE_CACHE, ctx, url.searchParams.get('app'), () => leaderboard(env.DB, url.searchParams.get('app')));
   if (path.startsWith('/api/stacks/')) return json(await stackDetails(env.DB, path.slice(12)));
   if (path.startsWith('/api/')) throw new HttpError(404, 'Endpoint not found.');
   if (path.startsWith('/og/')) {
     const id = path.slice(4).replace(/\.png$/, '');
     if (!path.endsWith('.png')) throw new HttpError(404, 'Image not found.');
+    if (id !== 'default' && !isStackId(id)) throw new HttpError(404, 'Image not found.');
+    // Immutable artwork does not need a database read on a cache hit.
+    // Ignore arbitrary query strings/cookies; bump the version whenever the art changes.
+    const cacheKey = new Request(`${url.origin}/og/${id}.png?v=2`);
+    const cache = env.IMAGE_CACHE;
+    let cached;
+    try { cached = cache ? await cache.match(cacheKey) : null; } catch { /* Cache is optional. */ }
+    if (cached) return cached;
     let ids = [...EXAMPLE_IDS].sort();
     if (id !== 'default') {
-      if (!isStackId(id)) throw new HttpError(404, 'Image not found.');
-      const row = await readStack(env.DB, id);
+      const row = await env.DB.prepare('SELECT apps_json FROM stacks WHERE id=?').bind(id).first();
       if (!row) throw new HttpError(404, 'Image not found.');
       ids = JSON.parse(row.apps_json);
     }
-    // Cache only public, immutable artwork; query strings and cookies cannot poison the key.
-    const cacheKey = new Request(`${url.origin}/og/${id}.png?v=1`);
-    const cache = env.IMAGE_CACHE;
-    const cached = cache ? await cache.match(cacheKey) : null;
-    if (cached) return cached;
     const bytes = await socialImage(ids, env.ASSETS, url.origin);
     const response = new Response(bytes, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400', 'content-disposition': `inline; filename="saas-off-${id}.png"` } });
-    if (cache) ctx?.waitUntil(cache.put(cacheKey, response.clone()));
+    if (cache) {
+      const write = cache.put(cacheKey, response.clone()).catch(() => {});
+      if (ctx?.waitUntil) ctx.waitUntil(write); else await write;
+    }
     return response;
   }
   if (path === '/robots.txt') return new Response('User-agent: *\nAllow: /\nDisallow: /api/\n', { headers: { 'content-type': 'text/plain' } });

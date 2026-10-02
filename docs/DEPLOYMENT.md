@@ -1,54 +1,75 @@
-# Deployment and launch checklist
+# Launch saas-off.com
 
-## 1. Cloudflare database and Worker
+## Architecture and decisions
 
-This implementation uses one Cloudflare Worker with static assets and one D1 database. No Supabase, external image-rendering service, URL shortener, analytics account or LinkedIn API key is required.
+One Cloudflare Worker, static assets and one D1 database. The domain is registered at IONOS. D1 is retained for transactional picks and leaderboard queries; no KV namespace is needed. The H1 highlight stays. The challenge is “Only four tabs. Choose wisely.”
 
-1. Install Node 22.16+ and run `npm install`.
-2. Run `npx wrangler login`.
-3. Run `npx wrangler d1 create saas-off`.
-4. Replace `REPLACE_WITH_YOUR_D1_DATABASE_ID` in `wrangler.jsonc` with the returned ID. Database IDs are not credentials.
-5. Run `npm run db:remote` to apply the migration.
-6. Generate a random secret, for example `openssl rand -base64 48`. Set it with `npx wrangler secret put COOKIE_SECRET`; do not paste it into a tracked file.
-7. Run `npm run build`. Review `dist/icon-provenance.json` and the visual icons. Resolve unacceptable initial/parent-brand fallbacks before a public launch.
-8. Run `npm test`, `npx wrangler deploy --dry-run` and `npm run test:e2e`.
-9. Run `npm run deploy` and test the returned `workers.dev` URL.
+This repository configures deployment but does not provision an account, paid plan, database, secret or DNS zone by itself.
 
-For Cloudflare-runtime local testing, create `.dev.vars` (ignored by Git) containing a local-only `COOKIE_SECRET`, then run `npm run dev:worker`. The Node development server uses a known development-only secret and must not be used as the public deployment.
+## 1. Activate the domain in Cloudflare
 
-## 2. Your £1 IONOS domain
+Add **saas-off.com** to the intended Cloudflare account. Review and preserve existing DNS records, then change the authoritative nameservers at IONOS to the exact pair Cloudflare supplies. Do not replace records for other services blindly. Wait for the Cloudflare zone to show as active.
 
-IONOS is the registrar, not the runtime host. Do not buy an IONOS hosting package just for this app.
+`wrangler.jsonc` declares an apex custom domain, not a route to an unrelated origin. Deployment provisions the custom-domain route/certificate once the zone is available. IONOS hosting is not required. There is no `www` route in this configuration; add an explicit redirect separately if needed.
 
-Cloudflare Workers custom domains require the hostname to belong to an active Cloudflare zone in the same account. Add the domain to Cloudflare, preserve any existing DNS records, then change its authoritative nameservers at IONOS to the pair Cloudflare supplies. For a brand-new unused domain this has fewer moving parts. Changing nameservers on an existing domain can affect other services; review their records first.
+## 2. Provision D1 and the signing secret
 
-In the Worker's **Settings → Domains & Routes**, add the custom domain. Test HTTPS and the complete picker flow. Set the Worker's plain-text variable `SITE_URL` to the final HTTPS origin. Keep one canonical host; configure a redirect for the alternate `www` or apex host as appropriate.
+```sh
+npm install
+npx wrangler login
+npx wrangler d1 create saas-off
+```
 
-Do not point a naked DNS CNAME at `workers.dev` and assume that establishes a supported custom domain. Use Cloudflare's custom-domain setup.
+Copy the returned database ID into `wrangler.jsonc`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`. IDs are not credentials. Then:
 
-No domain name is hard-coded in the application, so the exact IONOS purchase can be chosen independently.
+```sh
+npm run db:remote
+npx wrangler secret put COOKIE_SECRET
+```
 
-## 3. Production smoke test
+Use a securely generated random secret of at least 32 characters, for example from `openssl rand -base64 48`. Supply it at Wrangler's prompt, not in a tracked file, issue or chat. Do not rotate it on every deployment: it signs the anonymous browser identities.
 
-- Submit four apps, copy the result URL and open it in a second browser.
-- Choose the same four in a different order. Confirm the URL is identical and the count increases once for the second browser.
-- Repeat in one browser; the count must not increase. Change one app; the original pick must move.
-- Inspect the first HTML response for `og:image`, `og:url` and the exact four names.
-- Open the OG image directly. It must return `image/png`, 1,200 × 630 dimensions, and four correct logos/names without live counts.
-- Test the canonical URL in LinkedIn's Post Inspector before announcing the site. A network-accessible Worker is required for this; localhost previews do not prove LinkedIn can fetch the deployed image.
-- Verify the daily maintenance trigger, D1 availability, rate limits, unknown-route 404s and mobile layout.
-- Retain a database backup/export before later schema changes. Never reset a live database to apply a migration.
+## 3. Review assets, test and deploy
 
-## 4. Budget and scaling
+```sh
+REFRESH_ICONS=1 npm run build
+npm run check
+npm test
+npm run benchmark:og
+npx playwright install chromium
+npm run test:e2e
+npx wrangler deploy --dry-run
+npm run deploy
+```
 
-Do not assume that a low-cost domain makes runtime usage free or unlimited. Review the current Workers and D1 allowances for your account, configure billing/usage alerts, and load-test a **cold** image request as well as cached image requests before a wider campaign. PNG composition consumes CPU; dynamic counts also read D1.
+Review `dist/icon-provenance.json` and the actual icons, including Jira, Figma, GitHub and Netlify. Builds can fall back to attributed glyphs or initials; that is not evidence every first-party favicon was retrieved. Resolve misleading artwork before public launch. Review and commit the dependency lockfile generated by the first network-enabled install.
 
-The edge image cache is an optimisation, not durable image storage. Cold requests can re-render from the static trusted artwork. At larger scale, consider durable image storage, stronger abuse controls, cached aggregate reads and explicit campaign attribution. CAPTCHA/Turnstile is deliberately not in the initial flow. Do not present its current abuse controls as bot-proof.
+The production canonical origin is already `https://saas-off.com`. The deployment command does not upgrade the Cloudflare plan. A missing D1 ID, secret or active DNS zone must be resolved before the full public journey is ready.
 
-## References
+For local Worker testing, create an ignored `.dev.vars` with a development-only `COOKIE_SECRET`, then run `npm run dev:worker`. That command clears the production `SITE_URL` override. The Node development server must never be used as the public host.
 
-- https://developers.cloudflare.com/workers/static-assets/
+## 4. Smoke-test the public site
+
+- Submit four apps, then repeat in a different order: the URL must match and the same browser must not add another pick. A second browser may add one pick.
+- Change one app: the pick must move, not duplicate. The leaderboard may lag by up to 30 seconds; individual apps are the default view.
+- Inspect the initial HTML for the canonical `https://saas-off.com/s/...` URL and versioned `/og/...png?v=2` image. Test GET and HEAD; no preview request may vote.
+- Verify the PNG opens at 1,200 × 630 with the correct four logos, without live ranks or counts. Test the first cold request, not just a warm cache.
+- Use LinkedIn Post Inspector against the public combination page. Local rendering does not establish that LinkedIn can fetch it.
+- Verify the retained H1 line on mobile and desktop, functional footer/repository links, genuine 404s, rate limits, D1 availability and daily housekeeping.
+
+## 5. Cost checks before promotion
+
+Cloudflare's published Free Worker CPU allowance is 10 ms per invocation at the time of this change. Local Node diagnostics for the PNG renderer exceed that figure, but local process CPU is **not** the same measurement as production Worker CPU. Validate it on the actual runtime; the free plan is not yet certified for this implementation. If cold rendering exceeds the allowance, optimise it or deliberately select the paid plan—do not silently change billing.
+
+The 30-second leaderboard cache reduces repeat database reads. Versioned image cache hits avoid D1 and rendering entirely. Cache contents are local to the serving data centre, can be evicted, and are not durable storage. Both optimisations fail open to the authoritative implementation if the cache is unavailable.
+
+Check current usage/quotas and export D1 before schema changes. No deployment should reset production data. Counts are approximate anonymous picks, not verified people or market-share research.
+
+## Official references
+
 - https://developers.cloudflare.com/workers/configuration/routing/custom-domains/
+- https://developers.cloudflare.com/workers/runtime-apis/cache/
+- https://developers.cloudflare.com/workers/platform/limits/
 - https://developers.cloudflare.com/d1/get-started/
-- https://developers.cloudflare.com/d1/worker-api/d1-database/
+- https://developers.cloudflare.com/workers/configuration/secrets/
 - https://www.linkedin.com/post-inspector/

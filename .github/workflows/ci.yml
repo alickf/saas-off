@@ -23,10 +23,16 @@ jobs:
         env:
           SKIP_ICON_FETCH: '1'
       - run: npm test
+      - name: Diagnostic cold OG benchmark
+        run: npm run benchmark:og
       - name: Validate Worker bundle
         run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - name: Review first-party icon sources
+        run: npm run build
+        env:
+          REFRESH_ICONS: '1'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -35,4 +41,6 @@ jobs:
             playwright-report/
             test-results/
             package-lock.json
+            dist/icon-provenance.json
+            dist/icons/
           retention-days: 7
