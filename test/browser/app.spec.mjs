@@ -1,0 +1,35 @@
+import { test, expect } from '@playwright/test';
+test('pick four, share a canonical stack and avoid duplicate votes', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Show my stack' })).toBeDisabled();
+  await page.getByRole('searchbox', { name: 'Search apps' }).fill('atlassian');
+  await expect(page.getByRole('button', { name: 'Add Jira', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Add Jira', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Search apps' }).fill('');
+  for (const name of ['Figma','GitHub','Netlify']) await page.getByRole('button', { name: `Add ${name}`, exact:true }).click();
+  await expect(page.getByRole('button', { name: 'Add Slack', exact:true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Show my stack' }).click();
+  await expect(page).toHaveURL(/\/s\/[A-Za-z0-9_-]{16}$/);
+  await expect(page.getByRole('link', { name: 'Share on LinkedIn' })).toHaveAttribute('href', /linkedin\.com\/sharing\/share-offsite/);
+  const before = await page.locator('#picks-value').textContent();
+  await page.getByRole('button', { name: 'These are my four too' }).click();
+  await expect(page.locator('#picks-value')).toHaveText(before);
+  const image = page.locator('.share-art img');
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate(el => el.naturalWidth)).toBe(1200);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: `test-results/stack-${test.info().project.name}.png`, fullPage:true });
+});
+test('keyboard search, empty search and footer links work', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('searchbox').fill('no-app-has-this-name');
+  await expect(page.getByRole('heading', { name: 'No app by that name. Yet.' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open source on GitHub' })).toHaveAttribute('href', 'https://github.com/alickf/saas-off');
+  await page.goto('/apps/netlify');
+  await expect(page.getByRole('link', { name: 'Build my four with Netlify' })).toHaveAttribute('href', '/?app=netlify');
+  await page.getByRole('link', { name: 'Build my four with Netlify' }).click();
+  await expect(page.locator('#slots')).toContainText('Netlify');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});

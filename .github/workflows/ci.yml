@@ -1,0 +1,38 @@
+name: Build and test
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npm run check
+      - name: Build with deterministic offline icon fallbacks
+        run: npm run build
+        env:
+          SKIP_ICON_FETCH: '1'
+      - run: npm test
+      - name: Validate Worker bundle
+        run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-report-and-lockfile
+          path: |
+            playwright-report/
+            test-results/
+            package-lock.json
+          retention-days: 7

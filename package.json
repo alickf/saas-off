@@ -1,0 +1,27 @@
+{
+  "name": "saas-off",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Four tabs. Show your stack. An open-source, account-free app picker.",
+  "license": "MIT",
+  "engines": { "node": ">=22.16.0" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && node scripts/dev.mjs",
+    "start": "node scripts/dev.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "playwright test",
+    "check": "node scripts/check.mjs",
+    "db:local": "wrangler d1 migrations apply saas-off --local",
+    "db:remote": "wrangler d1 migrations apply saas-off --remote",
+    "dev:worker": "npm run build && npm run db:local && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "@fortawesome/free-brands-svg-icons": "6.7.2",
+    "@playwright/test": "^1.55.1",
+    "sharp": "^0.34.3",
+    "wrangler": "^4.40.0"
+  }
+}

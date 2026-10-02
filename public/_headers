@@ -1,0 +1,12 @@
+/icons/*
+  Cache-Control: public, max-age=86400
+  X-Content-Type-Options: nosniff
+/art/*
+  Content-Type: application/octet-stream
+  Cache-Control: public, max-age=86400
+  X-Content-Type-Options: nosniff
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'
